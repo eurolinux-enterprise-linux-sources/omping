@@ -1,4 +1,4 @@
-# Copyright (c) 2010, Red Hat, Inc.
+# Copyright (c) 2010-2011, Red Hat, Inc.
 #
 # Permission to use, copy, modify, and/or distribute this software for any
 # purpose with or without fee is hereby granted, provided that the above
@@ -12,7 +12,7 @@
 # OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN
 # CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
-CFLAGS+=-Wall -Wshadow -Wp,-D_FORTIFY_SOURCE=2 -g
+CFLAGS += -Wall -Wshadow -Wp,-D_FORTIFY_SOURCE=2 -g
 PREFIX ?= /usr/local
 BINDIR ?= $(PREFIX)/bin
 MANDIR ?= $(PREFIX)/share/man
@@ -24,26 +24,34 @@ VERSION_SH = `grep PROGRAM_VERSION omping.h | head -n 1 | sed 's/^.*\"\(.*\)\"/\
 
 all: $(PROGRAM_NAME)
 
-$(PROGRAM_NAME): addrfunc.o cli.o logging.o msg.o msgsend.o omping.o rhfunc.o rsfunc.o sockfunc.o tlv.o util.o
-	$(CC) $(CFLAGS) $(LDFLAGS) addrfunc.o cli.o logging.o msg.o msgsend.o omping.o rhfunc.o \
-	    rsfunc.o sockfunc.o tlv.o util.o -o $@
+all-illumos:
+	CFLAGS="$(CFLAGS) -D_XOPEN_SOURCE=600 -D_XOPEN_SOURCE_EXTENDED=1 -D__EXTENSIONS__=1" \
+	    LDFLAGS="$(LDFLAGS) -lsocket -lnsl" $(MAKE) all
+
+$(PROGRAM_NAME): addrfunc.o cli.o gcra.o logging.o msg.o msgsend.o omping.o rhfunc.o rsfunc.o \
+    sockfunc.o tlv.o util.o
+	$(CC) $(CFLAGS) $(LDFLAGS) addrfunc.o cli.o gcra.o logging.o msg.o msgsend.o omping.o \
+	    rhfunc.o rsfunc.o sockfunc.o tlv.o util.o -o $@
 
 addrfunc.o: addrfunc.c addrfunc.h logging.h
 	$(CC) -c $(CFLAGS) $< -o $@
 
-cli.o: cli.c cli.h omping.h logging.h addrfunc.h
+cli.o: cli.c cli.h addrfunc.h omping.h logging.h sockfunc.h
+	$(CC) -c $(CFLAGS) $< -o $@
+
+gcra.o: gcra.c gcra.h util.h
 	$(CC) -c $(CFLAGS) $< -o $@
 
 logging.o: logging.c logging.h
 	$(CC) -c $(CFLAGS) $< -o $@
 
-msg.o: msg.c msg.h logging.h tlv.h
+msg.o: msg.c msg.h logging.h omping.h tlv.h
 	$(CC) -c $(CFLAGS) $< -o $@
 
 msgsend.o: msgsend.c addrfunc.h logging.h msg.h msgsend.h omping.h rsfunc.h util.h
 	$(CC) -c $(CFLAGS) $< -o $@
 
-omping.o: omping.c logging.h addrfunc.h cli.h rhfunc.h util.h msg.h
+omping.o: omping.c addrfunc.h cli.h logging.h msg.h msgsend.h omping.h rhfunc.h rsfunc.h sockfunc.h tlv.h util.h
 	$(CC) -c $(CFLAGS) $< -o $@
 
 rhfunc.o: rhfunc.c rhfunc.h addrfunc.h util.h

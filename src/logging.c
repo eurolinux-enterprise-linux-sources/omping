@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, Red Hat, Inc.
+ * Copyright (c) 2010-2011, Red Hat, Inc.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -65,8 +65,8 @@ logging_hexdump(const char *file_name, int line, int log_level, const char *pref
 
 	if (logging_get_verbose() >= log_level) {
 		if (logging_get_verbose() >= LOGGING_LEVEL_DEBUG) {
-                        res += fprintf(stderr, "%s:%d ", file_name, line);
-                }
+			res += fprintf(stderr, "%s:%d ", file_name, line);
+		}
 
 		if (prefix_str != NULL) {
 			res += fprintf(stderr, "%s", prefix_str);

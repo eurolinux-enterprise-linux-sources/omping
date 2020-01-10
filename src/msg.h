@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, Red Hat, Inc.
+ * Copyright (c) 2010-2011, Red Hat, Inc.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -55,7 +55,7 @@ struct msg_decoded {
 	int		 request_opt_server_tstamp;
 	int		 seq_num_isset;
 	int		 server_tstamp_isset;
-	const char 	*client_id;
+	const char	*client_id;
 	const char	*mcast_grp;
 	const char	*server_info;
 	const char	*ses_id;

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, Red Hat, Inc.
+ * Copyright (c) 2010-2011, Red Hat, Inc.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -28,6 +28,10 @@
 #include <net/if.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 enum ms_answer_type {
 	MS_ANSWER_UCAST = 1,

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, Red Hat, Inc.
+ * Copyright (c) 2010-2011, Red Hat, Inc.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -26,7 +26,7 @@ extern "C" {
 #endif
 
 #define PROGRAM_NAME		"omping"
-#define PROGRAM_VERSION		"0.0.1"
+#define PROGRAM_VERSION		"0.0.4"
 #define PROGRAM_SERVER_INFO	PROGRAM_NAME" "PROGRAM_VERSION
 
 #define DEFAULT_PORT_S		"4321"
@@ -36,9 +36,47 @@ extern "C" {
 #define DEFAULT_WAIT_TIME	1000
 #define DEFAULT_TTL		64
 
+/*
+ * Default Wait For Finish multiply constant. wait_time is multiplied with following
+ * value.
+ */
+#define DEFAULT_WFF_TIME_MUL	3
+
+/*
+ * Minimum number of elements in duplicate buffer
+ */
+#define MIN_DUP_BUF_ITEMS	1024
+/*
+ * Default seconds which must be stored in duplicate buffer.
+ * This value is divided by ping interval in seconds. If value is smaller
+ * then MIN_DUP_BUF_ITEMS, then MIN_DUP_BUF_ITEMS is used.
+ */
+#define DUP_BUF_SECS		(2 * 60)
+
+/*
+ * Default burst value for rate limit GCRA
+ */
+#define GCRA_BURST		5
+
+/*
+ * Minimum send and receive socket buffer size
+ */
+#define MIN_SNDBUF_SIZE		2048
+#define MIN_RCVBUF_SIZE		2048
+
+/*
+ * Protocol version used in messages
+ */
 #define PROTOCOL_VERSION	2
 
 #define MAX_MSG_SIZE		65535
+
+enum omping_op_mode {
+	OMPING_OP_MODE_NORMAL,
+	OMPING_OP_MODE_CLIENT,
+	OMPING_OP_MODE_SERVER,
+	OMPING_OP_MODE_SHOW_VERSION,
+};
 
 #ifdef __cplusplus
 }

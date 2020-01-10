@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, Red Hat, Inc.
+ * Copyright (c) 2010-2011, Red Hat, Inc.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -21,6 +21,10 @@
 #include <arpa/inet.h>
 
 #include <netinet/in.h>
+
+#ifdef __sun
+#include <alloca.h>
+#endif /* __sun */
 
 #include <err.h>
 #define __STDC_FORMAT_MACROS
@@ -129,7 +133,7 @@ tlv_add_opt_request(char *msg, size_t msg_len, size_t *pos, uint16_t *opts, size
 {
 	char *value;
 	size_t val_len;
-	int i;
+	unsigned int i;
 	uint16_t opt;
 
 	if (opts_len == 0)
@@ -137,7 +141,7 @@ tlv_add_opt_request(char *msg, size_t msg_len, size_t *pos, uint16_t *opts, size
 
 	val_len = opts_len * sizeof(uint16_t);
 
-	value = alloca(val_len);
+	value = (char *)alloca(val_len);
 
 	for (i = 0; i < opts_len; i++) {
 		opt = htons(opts[i]);
@@ -186,7 +190,7 @@ tlv_add_sas(char *msg, size_t msg_len, size_t *pos, enum tlv_opt_type opt,
 	if (store_prefix_len)
 		opt_len += sizeof(pref_len_val);
 
-	value = alloca(opt_len);
+	value = (char *)alloca(opt_len);
 
 	af = htons(af);
 
@@ -491,13 +495,13 @@ tlv_opt_type_to_str(enum tlv_opt_type opt)
 int
 tlv_pref_eq(const struct sockaddr_storage *sas, uint16_t iana_af, uint8_t prefix, const char *addr)
 {
-	const char *sas_addr;
+	char sas_addr[32];
+	size_t sas_addr_len;
 	uint16_t sas_iana_af;
-	char cb1, cb2;
-	uint8_t bit_pos;
-	uint8_t byte_pos;
-	uint8_t bytes_compare;
+	unsigned char cb1, cb2;
 	uint8_t plen_max, plen_min;
+
+	memset(sas_addr, 0, sizeof(sas_addr));
 
 	switch (sas->ss_family) {
 	case AF_INET:
@@ -506,7 +510,8 @@ tlv_pref_eq(const struct sockaddr_storage *sas, uint16_t iana_af, uint8_t prefix
 		plen_min = 4;
 		plen_max = 32;
 
-		sas_addr = (const char *)&((struct sockaddr_in *)sas)->sin_addr;
+		sas_addr_len = sizeof(struct in_addr);
+		memcpy(sas_addr, &((struct sockaddr_in *)sas)->sin_addr, sas_addr_len);
 		break;
 	case AF_INET6:
 		sas_iana_af = AF_IANA_IP6;
@@ -514,11 +519,12 @@ tlv_pref_eq(const struct sockaddr_storage *sas, uint16_t iana_af, uint8_t prefix
 		plen_min = 8;
 		plen_max = 128;
 
-		sas_addr = (const char *)&((struct sockaddr_in6 *)sas)->sin6_addr;
+		sas_addr_len = sizeof(struct in6_addr);
+		memcpy(sas_addr, &((struct sockaddr_in6 *)sas)->sin6_addr, sas_addr_len);
 		break;
 	default:
 		DEBUG_PRINTF("Unknown ss family %d", sas->ss_family);
-                errx(1, "Unknown ss family %d", sas->ss_family);
+		errx(1, "Unknown ss family %d", sas->ss_family);
 	}
 
 	if (iana_af != sas_iana_af) {
@@ -536,40 +542,23 @@ tlv_pref_eq(const struct sockaddr_storage *sas, uint16_t iana_af, uint8_t prefix
 		return (0);
 	}
 
-	bit_pos = 0;
-	byte_pos = 0;
-
-	bytes_compare = prefix / 8;
-
-	if (bytes_compare > 0) {
-		/*
-		 * Whole bytes compare of prefix / 8
-		 */
-		if (memcmp(sas_addr, addr, bytes_compare) != 0) {
-			return (0);
-		}
-
-		bit_pos = 8 * bytes_compare;
-		byte_pos = bytes_compare;
+	/*
+	 * Full bytes comparation
+	 */
+	if (memcmp(sas_addr, addr, prefix / 8) != 0) {
+		return (0);
 	}
 
-	cb1 = cb2 = 0;
 
 	/*
-	 * Slower bit compare of rest
+	 * Rest bit comparation
 	 */
-	for (; bit_pos < prefix; bit_pos++) {
-		if (bit_pos % 8 == 0) {
-			cb1 = sas_addr[byte_pos];
-			cb2 = addr[byte_pos];
-		}
-
-		if ((cb1 & 0x80) != (cb2 & 0x80)) {
+	if (prefix % 8 != 0 && prefix / 8 < sizeof(sas_addr_len)) {
+		cb1 = (unsigned char)(sas_addr[prefix / 8] & (0xff << (8 - (prefix % 8))));
+		cb2 = (unsigned char)(addr[prefix / 8] & (0xff << (8 - (prefix % 8))));
+		if (cb1 != cb2) {
 			return (0);
 		}
-
-		cb1 <<= 1;
-		cb2 <<= 1;
 	}
 
 	return (1);

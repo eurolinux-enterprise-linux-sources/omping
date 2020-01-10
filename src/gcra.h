@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2011, Red Hat, Inc.
+ * Copyright (c) 2011, Red Hat, Inc.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -18,24 +18,32 @@
  * Author: Jan Friesse <jfriesse@redhat.com>
  */
 
-#ifndef _RSFUNC_H_
-#define _RSFUNC_H_
+#ifndef _GCRA_H_
+#define _GCRA_H_
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-extern int	rs_poll_timeout(int unicast_socket, int multicast_socket, int timeout,
-    struct timeval *old_tstamp);
+/*
+ * Structures definition
+ */
+struct gcra_item {
+	uint64_t tat;
+	unsigned int interval;
+	unsigned int tau;
+};
 
-extern ssize_t	rs_receive_msg(int sock, struct sockaddr_storage *from_addr, char *msg,
-    size_t msg_len, uint8_t *ttl, struct timeval *timestamp);
+/*
+ * Prototypes
+ */
+extern void		gcra_init(struct gcra_item *item, unsigned int interval,
+    unsigned int burst);
 
-extern ssize_t	rs_sendto(int sock, const char *msg, size_t msg_size,
-    const struct sockaddr_storage *to);
+extern int		gcra_rl(struct gcra_item *item, struct timeval tv);
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* _RSFUNC_H_ */
+#endif /* _GCRA_H_ */

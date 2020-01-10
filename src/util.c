@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, Red Hat, Inc.
+ * Copyright (c) 2010-2011, Red Hat, Inc.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -32,39 +32,110 @@
 #include <time.h>
 #include <unistd.h>
 
+#ifdef __CYGWIN__
+#include <windows.h>
+#endif
+
 #include "logging.h"
 #include "util.h"
 
-void	util_gen_id(char *id, size_t len, const struct ai_item *ai_item,
+/*
+ * Function prototypes
+ */
+#ifdef __CYGWIN__
+static int	util_cygwin_gettimeofday(struct timeval *tv, struct timezone *tz);
+#endif
+
+static void	util_gen_id(char *id, size_t len, const struct ai_item *ai_item,
     const struct sockaddr_storage *sas);
 
-void	util_gen_id_add_sas(char *id, size_t len, size_t *pos, const struct sockaddr_storage *sas);
+static void	util_gen_id_add_sas(char *id, size_t len, size_t *pos,
+    const struct sockaddr_storage *sas);
 
 /*
- * Return abs value of (t2 - t1) in ms double precission.
+ * Functions implementation
+ */
+
+#ifdef __CYGWIN__
+/*
+ * cygwin version of gettimeofday but with microseconds precision. Uses windows Performance
+ * Counters to achieve precision if possible, otherwise cygwin gettimeofday implementation
+ * is used.
+ * Return 0 on success, otherwise -1.
+ */
+int
+util_cygwin_gettimeofday(struct timeval *tv, struct timezone *tz)
+{
+	/* Frequency of performance counter */
+	static LARGE_INTEGER freq;
+	/* Offset of starting pc */
+	static LARGE_INTEGER perf_count_offset;
+	/* Actual pc */
+	static LARGE_INTEGER perf_count;
+	/* Microsenconds base time */
+	static uint64_t us_base = 0;
+	/* Function was not called yet */
+	static int initialized = 0;
+	/* If not used pf, fallback to gettimeofday implementation */
+	static BOOL use_pf = 0;
+	/* Tmp timeval */
+	struct timeval tv2;
+	/* Diff between offset pc and actual pc */
+	int64_t perf_diff;
+	/* Actual time in microseconds */
+	uint64_t us;
+	/* Time in microseconds returned by gettimeofday */
+	uint64_t us_ref;
+
+	if (!initialized) {
+		initialized = 1;
+		use_pf = QueryPerformanceFrequency(&freq);
+		if (use_pf) {
+			QueryPerformanceCounter(&perf_count_offset);
+			gettimeofday(&tv2, tz);
+			us_base = tv2.tv_sec * (uint64_t)1000000 + tv2.tv_usec;
+		}
+	}
+
+	if (use_pf) {
+		QueryPerformanceCounter(&perf_count);
+	} else {
+		return (gettimeofday(tv, tz));
+	}
+
+	perf_diff = perf_count.QuadPart - perf_count_offset.QuadPart;
+	us = ((double)perf_diff / (double)freq.QuadPart) * 1000000.0 + us_base;
+
+	gettimeofday(&tv2, tz);
+	us_ref = tv2.tv_sec * (uint64_t)1000000 + tv2.tv_usec;
+
+	if (util_u64_absdiff(us, us_ref) > (uint64_t)1000000) {
+		us_base = us = us_ref;
+		perf_count_offset.QuadPart = perf_count.QuadPart;
+	}
+
+	tv->tv_sec = us / (uint64_t)1000000;
+	tv->tv_usec = us % (uint64_t)1000000;
+
+	return (0);
+}
+#endif /* __CYGWIN__ */
+
+/*
+ * Returns absolute value of n
  */
 double
-util_time_double_absdiff(struct timeval t1, struct timeval t2)
+util_fabs(double n)
 {
-        double dt1, dt2, tmp;
 
-        dt1 = t1.tv_usec + t1.tv_sec * 1000000;
-        dt2 = t2.tv_usec + t2.tv_sec * 1000000;
-
-        if (dt2 > dt1) {
-                tmp = dt1;
-                dt1 = dt2;
-                dt2 = tmp;
-        }
-
-        return (dt1 - dt2) / 1000.0;
+	return (n < 0 ? -n : n);
 }
 
 /*
  * generate random ID from current pid, random data from random(3) and optionally addresses ai_item
  * and sas. ID is stored in id with maximum length len.
  */
-void
+static void
 util_gen_id(char *id, size_t len, const struct ai_item *ai_item,
     const struct sockaddr_storage *sas)
 {
@@ -110,7 +181,7 @@ util_gen_id(char *id, size_t len, const struct ai_item *ai_item,
  * Add IP address from sas to id with length len to position pos. Also adjust pos to position after
  * added item.
  */
-void
+static void
 util_gen_id_add_sas(char *id, size_t len, size_t *pos, const struct sockaddr_storage *sas)
 {
 	void *addr_pointer;
@@ -166,7 +237,11 @@ util_get_time(void)
 {
 	struct timeval tv;
 
+#ifdef __CYGWIN__
+	util_cygwin_gettimeofday(&tv, NULL);
+#else
 	gettimeofday(&tv, NULL);
+#endif
 
 	return (tv);
 }
@@ -178,7 +253,7 @@ void
 util_random_init(const struct sockaddr_storage *local_addr)
 {
 	unsigned int seed;
-	int i;
+	unsigned int i;
 
 	seed = time(NULL) + getpid();
 
@@ -207,4 +282,126 @@ util_time_absdiff(struct timeval t1, struct timeval t2)
 	}
 
 	return (u64t1 - u64t2);
+}
+
+/*
+ * Return abs value of (t2 - t1) in ms double precission.
+ */
+double
+util_time_double_absdiff(struct timeval t1, struct timeval t2)
+{
+	return (util_time_double_absdiff_us(t1, t2) / 1000.0);
+}
+
+/*
+ * Return abs value of (t2 - t1) in ns (nano seconds) double precission.
+ */
+double
+util_time_double_absdiff_ns(struct timeval t1, struct timeval t2)
+{
+	return (util_time_double_absdiff_us(t1, t2) * 1000.0);
+}
+
+/*
+ * Return abs value of (t2 - t1) in us (micro seconds) double precission.
+ */
+double
+util_time_double_absdiff_us(struct timeval t1, struct timeval t2)
+{
+	double dt1, dt2, tmp;
+
+	dt1 = t1.tv_usec + t1.tv_sec * UTIL_NSINMS;
+	dt2 = t2.tv_usec + t2.tv_sec * UTIL_NSINMS;
+
+	if (dt2 > dt1) {
+		tmp = dt1;
+		dt1 = dt2;
+		dt2 = tmp;
+	}
+
+	return (dt1 - dt2);
+}
+
+/*
+ * Return standard deviation based on m2 value and number of items n. Value is rounded to 0.001.
+ */
+double
+util_ov_std_dev(double m2, uint64_t n)
+{
+	return (util_u64sqrt((uint64_t)util_ov_variance(m2, n)));
+}
+
+/*
+ * On-line algorithm for compute variance.
+ * Based on Donald E. Knuth (1998). The Art of Computer Programming, volume 2: p. 232.
+ * function updats mean and m2. x is new value and n is absolute number of all items.
+ */
+void
+util_ov_update(double *mean, double *m2, double x, uint64_t n)
+{
+	double delta;
+
+	delta = x - *mean;
+	*mean = *mean + delta / n;
+	*m2 = *m2 + delta * (x - *mean);
+}
+
+/*
+ * Return variance based on m2 value and number of items n.
+ */
+double
+util_ov_variance(double m2, uint64_t n)
+{
+	return ((n > 1) ? (m2 / (n - 1)) : 0.0);
+}
+
+/*
+ * Return number of miliseconds from timeval structure
+ */
+uint64_t
+util_tv_to_ms(struct timeval t1)
+{
+	uint64_t u64;
+
+	u64 = t1.tv_usec / 1000 + t1.tv_sec * 1000;
+
+	return (u64);
+}
+
+/*
+ * Return absolute difference between two unsigned 64-bit integers
+ */
+uint64_t
+util_u64_absdiff(uint64_t u1, uint64_t u2)
+{
+	uint64_t tmpu;
+
+	if (u1 > u2) {
+		tmpu = u1;
+		u1 = u2;
+		u2 = tmpu;
+	}
+
+	return (u2 - u1);
+}
+
+/*
+ * Return sqrt of 64bit unsigned int n
+ */
+uint32_t
+util_u64sqrt(uint64_t n)
+{
+	double x, x2;
+
+	if (n == 0) {
+		return (0);
+	}
+
+	x = n;
+
+	while (util_fabs((x2 = (x + n / x) / 2) - x) >= 0.5) {
+		x = x2;
+	}
+
+	return ((uint32_t)x2);
 }

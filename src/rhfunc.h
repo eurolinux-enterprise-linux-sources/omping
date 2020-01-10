@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, Red Hat, Inc.
+ * Copyright (c) 2010-2011, Red Hat, Inc.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -30,6 +30,7 @@
 #include <netdb.h>
 
 #include "addrfunc.h"
+#include "gcra.h"
 #include "util.h"
 
 #ifdef __cplusplus
@@ -45,38 +46,66 @@ enum rh_client_state {
 enum rh_server_state {
 	RH_SS_INITIAL,
 	RH_SS_ANSWER,
+	RH_SS_FINISHING,
+};
+
+enum rh_client_stop_reason {
+	RH_CSR_NONE,
+	RH_CSR_SERVER,
+	RH_CSR_TO_SEND_EXHAUSTED,
+	RH_CSR_SEND_MAXIMUM,
+	RH_CSR_REMOTE_VERSION_RECEIVED,
+};
+
+enum rh_list_finish_state {
+	RH_LFS_CLIENT,
+	RH_LFS_SERVER,
+	RH_LFS_BOTH,
 };
 
 /*
  * Remote host info item, client info part
  */
 struct rh_item_ci {
-	enum rh_client_state state;
-	char client_id[CLIENTID_LEN];
-	struct timeval last_init_ts;
-	char *ses_id;
-	double rtt_max[2];
-	double rtt_min[2];
-	double rtt_sum[2];
-	size_t ses_id_len;
-	uint32_t seq_num;
-	uint32_t no_err_msgs;
-	uint32_t no_received[2];
+	enum		rh_client_state state;
+	char		client_id[CLIENTID_LEN];
+	struct timeval	last_init_ts;
+	struct timeval	last_query_ts;
+	char		*server_info;
+	char		*ses_id;
+	uint32_t	*dup_buffer[2];
+	size_t		server_info_len;
+	size_t		ses_id_len;
+	double		avg_rtt[2];
+	double		m2_rtt[2];
+	double		rtt_max[2];
+	double		rtt_min[2];
+	uint64_t	no_err_msgs;
+	uint64_t	no_dups[2];
+	uint64_t	no_received[2];
+	uint64_t	no_sent;
+	uint32_t	first_mcast_seq;
+	uint32_t	lru_seq_num; /* Last Received Unicast seq number */
+	uint32_t	seq_num;
+	int		dup_buf_items;
+	int		seq_num_overflow;
 };
 
 /*
  * Remote host info item, server info part
  */
 struct rh_item_si {
-	enum rh_server_state state;
-	char ses_id[SESSIONID_LEN];
+	enum			rh_server_state state;
+	char			ses_id[SESSIONID_LEN];
+	struct gcra_item	gcra;
+	struct timeval		last_init_ts;
 };
 
 /*
  * Remote host info item. This is intended to use with TAILQ list.
  */
 struct rh_item {
-	struct ai_item *addr;
+	struct ai_item	*addr;
 	struct rh_item_ci client_info;
 	struct rh_item_si server_info;
 	TAILQ_ENTRY(rh_item) entries;
@@ -87,8 +116,12 @@ struct rh_item {
  */
 TAILQ_HEAD(rh_list, rh_item);
 
-extern struct rh_item	*rh_list_add_item(struct rh_list *rh_list, struct ai_item *addr);
-extern void		 rh_list_create(struct rh_list *rh_list, struct ai_list *remote_addrs);
+extern struct rh_item	*rh_list_add_item(struct rh_list *rh_list, struct ai_item *addr,
+    int dup_buf_items, int rate_limit_time);
+
+extern void		 rh_list_create(struct rh_list *rh_list, struct ai_list *remote_addrs,
+    int dup_buf_items, int rate_limit_time);
+
 extern struct rh_item	*rh_list_find(struct rh_list *rh_list, const struct sockaddr *sa);
 extern void		 rh_list_free(struct rh_list *rh_list);
 
@@ -97,6 +130,10 @@ extern void		 rh_list_gen_cid(struct rh_list *rh_list,
 
 extern int		 rh_list_hn_max_len(struct rh_list *rh_list);
 
+extern unsigned int	 rh_list_length(const struct rh_list *rh_list);
+
+extern void		 rh_list_put_to_finish_state(struct rh_list *rh_list,
+    enum rh_list_finish_state fs);
 
 #ifdef __cplusplus
 }

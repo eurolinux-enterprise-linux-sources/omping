@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, Red Hat, Inc.
+ * Copyright (c) 2010-2011, Red Hat, Inc.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -22,6 +22,8 @@
 #define _CLI_H_
 
 #include "addrfunc.h"
+#include "omping.h"
+#include "sockfunc.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -29,7 +31,11 @@ extern "C" {
 
 extern int	cli_parse(struct ai_list *ai_list, int argc, char * const argv[],
     char **local_ifname, int *ip_ver, struct ai_item *local_addr, int *wait_time,
-    struct ai_item *mcast_addr, uint16_t *port, uint8_t *ttl);
+    enum sf_transport_method *transport_method, struct ai_item *mcast_addr,
+    uint16_t *port, uint8_t *ttl, int *single_addr, int *quiet, int *cont_stat,
+    int *timeout_time, int *wait_for_finish_time, int *dup_buf_items, int *rate_limit_time,
+    int *sndbuf_size, int *rcvbuf_size, uint64_t *send_count_queries, int *auto_exit,
+    enum omping_op_mode *op_mode);
 
 #ifdef __cplusplus
 }

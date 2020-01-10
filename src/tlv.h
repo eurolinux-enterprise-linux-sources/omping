@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, Red Hat, Inc.
+ * Copyright (c) 2010-2011, Red Hat, Inc.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -63,9 +63,9 @@ enum tlv_opt_type {
  * tlv_iterator type
  */
 struct tlv_iterator {
-	const char *msg;
-	size_t msg_len;
-	size_t pos;
+	const char	*msg;
+	size_t		msg_len;
+	size_t		pos;
 };
 
 /*

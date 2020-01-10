@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, Red Hat, Inc.
+ * Copyright (c) 2010-2011, Red Hat, Inc.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -41,7 +41,9 @@
  * list of them.
  */
 int
-af_ai_eq(const struct addrinfo *a1, const struct addrinfo *a2) {
+af_ai_eq(const struct addrinfo *a1, const struct addrinfo *a2)
+{
+
 	return ((a1->ai_family == a2->ai_family) &&
 	    (a1->ai_socktype == a2->ai_socktype) &&
 	    (a1->ai_protocol == a2->ai_protocol) &&
@@ -67,6 +69,28 @@ af_ai_deep_eq(const struct addrinfo *a1, const struct addrinfo *a2)
 	}
 
 	return (0);
+}
+
+/*
+ * Find out if ai is duplicate of items in ai_list. ai_list is first addrinfo item (returned by
+ * getaddrinfo) and list is traversed up to ai item.
+ * Function return 0 if ai is not duplicate of items in ai_list, otherwise 1
+ */
+int
+af_ai_is_dup(const struct addrinfo *ai_list, const struct addrinfo *ai)
+{
+	const struct addrinfo *ai_i;
+	int res;
+
+	res = 0;
+
+	for (ai_i = ai_list; res == 0 && ai_i != ai && ai_i != NULL; ai_i = ai_i->ai_next) {
+		if (af_ai_eq(ai_i, ai)) {
+			res = 1;
+		}
+	}
+
+	return (res);
 }
 
 /*
@@ -157,13 +181,20 @@ void
 af_ai_list_free(struct ai_list *ai_list)
 {
 	struct ai_item *ai_item;
+	struct ai_item *ai_item_next;
 
-	while (!TAILQ_EMPTY(ai_list)) {
-             ai_item = TAILQ_FIRST(ai_list);
-             TAILQ_REMOVE(ai_list, ai_item, entries);
-             free(ai_item->host_name);
-             free(ai_item);
-     }
+	ai_item = TAILQ_FIRST(ai_list);
+
+	while (ai_item != NULL) {
+		ai_item_next = TAILQ_NEXT(ai_item, entries);
+
+		free(ai_item->host_name);
+		free(ai_item);
+
+		ai_item = ai_item_next;
+	}
+
+	TAILQ_INIT(ai_list);
 }
 
 /* Return supported ip version. This function doesn't go deeply to structure. It can return 4 (ipv4
@@ -234,13 +265,57 @@ af_copy_addr(const struct sockaddr_storage *a1, const struct sockaddr_storage *a
 }
 
 /*
- * Tries to find local address in ai_list with given ip_ver. Returns 0 on success, otherwise -1.
+ * Copy informations stored in sockaddr sa to sockaddr_storage sas.
+ */
+void
+af_copy_sa_to_sas(struct sockaddr_storage *sas, const struct sockaddr *sa)
+{
+
+	memset(sas, 0, sizeof(*sa));
+	memcpy(sas, sa, af_sa_len(sa));
+}
+
+/*
+ * Fill in sockaddr sa pointer with in addr any for specified sa_family with specified port. port
+ * must be in local byte order.
+ */
+void
+af_create_any_addr(struct sockaddr *sa, int sa_family, uint16_t port)
+{
+	struct sockaddr_in sa_in;
+	struct sockaddr_in6 sa_in6;
+
+	switch (sa_family) {
+	case PF_INET:
+		memset(&sa_in, 0, sizeof(sa_in));
+		sa_in.sin_family = sa_family;
+		sa_in.sin_port = htons(port);
+		sa_in.sin_addr.s_addr = INADDR_ANY;
+		memcpy(sa, &sa_in, sizeof(sa_in));
+		break;
+	case PF_INET6:
+		memset(&sa_in6, 0, sizeof(sa_in6));
+		sa_in6.sin6_family = sa_family;
+		sa_in6.sin6_port = htons(port);
+		sa_in6.sin6_addr = in6addr_any;
+		memcpy(sa, &sa_in6, sizeof(sa_in6));
+		break;
+	default:
+		DEBUG_PRINTF("Unknown ai family %d", sa_family);
+		errx(1, "Unknown ai family %d", sa_family);
+	}
+}
+
+/*
+ * Tries to find local address in ai_list with given ip_ver. if_flags may be set to bit mask with
+ * IFF_MULTICAST and/or IFF_BROADCAST and only network interface with that flags will be accepted.
+ * Returns 0 on success, otherwise -1.
  * It also changes ifa_list (result of getaddrs), ifa_local (local addr) and ai_item (addrinfo item
  * which matches ifa_local).
  */
 int
 af_find_local_ai(const struct ai_list *ai_list, int *ip_ver, struct ifaddrs **ifa_list,
-    struct ifaddrs **ifa_local, struct ai_item **ai_item)
+    struct ifaddrs **ifa_local, struct ai_item **ai_item, unsigned int if_flags)
 {
 	struct addrinfo *ai_i;
 	struct ai_item *aip;
@@ -259,9 +334,16 @@ af_find_local_ai(const struct ai_list *ai_list, int *ip_ver, struct ifaddrs **if
 
 	TAILQ_FOREACH(aip, ai_list, entries) {
 		for (ai_i = aip->ai; ai_i != NULL; ai_i = ai_i->ai_next) {
+			if (af_ai_is_dup(aip->ai, ai_i)) {
+				logging_sa_to_str(ai_i->ai_addr, sa_str, sizeof(sa_str));
+				DEBUG2_PRINTF("Found duplicate addr %s", sa_str);
+				continue ;
+			}
+
 			for (ifa_i = ifa; ifa_i != NULL; ifa_i = ifa_i->ifa_next) {
-				if (ifa_i->ifa_addr->sa_family != AF_INET &&
-				    ifa_i->ifa_addr->sa_family != AF_INET6) {
+				if (ifa_i->ifa_addr == NULL ||
+				    (ifa_i->ifa_addr->sa_family != AF_INET &&
+				    ifa_i->ifa_addr->sa_family != AF_INET6)) {
 					continue ;
 				}
 
@@ -271,7 +353,7 @@ af_find_local_ai(const struct ai_list *ai_list, int *ip_ver, struct ifaddrs **if
 				    sa_str2);
 
 				if (af_sockaddr_eq(ifa_i->ifa_addr, ai_i->ai_addr)) {
-					res = af_is_supported_local_ifa(ifa_i, *ip_ver);
+					res = af_is_supported_local_ifa(ifa_i, *ip_ver, if_flags);
 
 					if (res == 1 || res == 2) {
 						if (*ifa_local != NULL && ipv4_fallback == 0)
@@ -386,18 +468,43 @@ af_is_ai_in_list(const struct addrinfo *a1, const struct ai_list *ai_list)
 }
 
 /*
+ * Test if addr is multicast address.
+ * Return 0 if address is not multicast addres, otherwise != 0.
+ */
+int
+af_is_sa_mcast(const struct sockaddr *addr)
+{
+
+	switch (addr->sa_family) {
+	case AF_INET:
+		return IN_MULTICAST(ntohl(((struct sockaddr_in *)addr)->sin_addr.s_addr));
+		break;
+	case AF_INET6:
+		return IN6_IS_ADDR_MULTICAST(&((struct sockaddr_in6 *)addr)->sin6_addr);
+		break;
+	default:
+		DEBUG_PRINTF("Unknown sockaddr family");
+                errx(1, "Unknown sockaddr family");
+		break;
+	}
+
+	return (0);
+}
+
+/*
  * Test if ifa is supported device.
  * Such device must:
  * - not be loopback
  * - be up
- * - support multicast
+ * - support for if_flags (multicast/broadcast)
  * - support given ip_ver
+ * if_flags may be set to bit mask with IFF_MULTICAST and/or IFF_BROADCAST.
  * Function returns 0, if device doesn't fulfill requirements. 1, if device supports all
  * requirements and 2, if device support requirements and ip_ver is set to 0 but device supports
  * ipv4.
  */
 int
-af_is_supported_local_ifa(const struct ifaddrs *ifa, int ip_ver)
+af_is_supported_local_ifa(const struct ifaddrs *ifa, int ip_ver, unsigned int if_flags)
 {
 	char ai_s[LOGGING_SA_TO_STR_LEN];
 
@@ -415,10 +522,21 @@ af_is_supported_local_ifa(const struct ifaddrs *ifa, int ip_ver)
 		return (0);
 	}
 
-	if (!(ifa->ifa_flags & IFF_MULTICAST)) {
-		DEBUG2_PRINTF("%s with addr %s doesn't support mcast", ifa->ifa_name, ai_s);
+	if (if_flags & IFF_MULTICAST) {
+		if (!(ifa->ifa_flags & IFF_MULTICAST)) {
+			DEBUG2_PRINTF("%s with addr %s doesn't support mcast", ifa->ifa_name, ai_s);
 
-		return (0);
+			return (0);
+		}
+	}
+
+	if (if_flags & IFF_BROADCAST) {
+		if (!(ifa->ifa_flags & IFF_BROADCAST)) {
+			DEBUG2_PRINTF("%s with addr %s doesn't support broadcast", ifa->ifa_name,
+			    ai_s);
+
+			return (0);
+		}
 	}
 
 	if (ip_ver != 0 && af_sa_supported_ipv(ifa->ifa_addr) != ip_ver) {
@@ -463,6 +581,51 @@ af_sa_len(const struct sockaddr *sa)
 }
 
 /*
+ * Return port number in network order from addr
+ */
+uint16_t
+af_sa_port(const struct sockaddr *addr)
+{
+	uint16_t port;
+
+	switch (addr->sa_family) {
+	case AF_INET:
+		port = (((struct sockaddr_in *)addr)->sin_port);
+		break;
+	case AF_INET6:
+		port = (((struct sockaddr_in6 *)addr)->sin6_port);
+		break;
+	default:
+		DEBUG_PRINTF("Internal program error");
+		err(1, "Internal program error");
+		break;
+	}
+
+	return (port);
+}
+
+/*
+ * Set port number in network order to addr
+ */
+void
+af_sa_set_port(struct sockaddr *addr, uint16_t port)
+{
+
+	switch (addr->sa_family) {
+	case AF_INET:
+		((struct sockaddr_in *)addr)->sin_port = port;
+		break;
+	case AF_INET6:
+		((struct sockaddr_in6 *)addr)->sin6_port = port;
+		break;
+	default:
+		DEBUG_PRINTF("Internal program error");
+		err(1, "Internal program error");
+		break;
+	}
+}
+
+/*
  * Return supported ip version. This function doesn't go deeply to structure. It can return 4 (ipv4
  * is supported), 6 (ipv6 is supported) or 0 (nether ipv4 or ipv6 are supported).
  */
@@ -483,6 +646,29 @@ af_sa_supported_ipv(const struct sockaddr *sa)
 	}
 
 	return (ipv);
+}
+
+/*
+ * Fill in sockaddr dest pointer with in addr any for family from src and port from src.
+ */
+void
+af_sa_to_any_addr(struct sockaddr *dest, const struct sockaddr *src)
+{
+	uint16_t port;
+
+	switch (src->sa_family) {
+	case PF_INET:
+		port = ntohs(((struct sockaddr_in *)src)->sin_port);
+		break;
+	case PF_INET6:
+		port = ntohs(((struct sockaddr_in6 *)src)->sin6_port);
+		break;
+	default:
+		DEBUG_PRINTF("Unknown ai family %d", src->sa_family);
+		errx(1, "Unknown ai family %d", src->sa_family);
+	}
+
+	af_create_any_addr(dest, src->sa_family, port);
 }
 
 /*

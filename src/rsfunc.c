@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, Red Hat, Inc.
+ * Copyright (c) 2010-2011, Red Hat, Inc.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -64,7 +64,7 @@ rs_poll_timeout(int unicast_socket, int multicast_socket, int timeout, struct ti
 		*old_tstamp = cur_time;
 	}
 
-	if (util_time_absdiff(cur_time, *old_tstamp) > timeout) {
+	if ((int)util_time_absdiff(cur_time, *old_tstamp) > timeout) {
 		memset(old_tstamp, 0, sizeof(*old_tstamp));
 
 		return (0);
@@ -127,13 +127,15 @@ rs_poll_timeout(int unicast_socket, int multicast_socket, int timeout, struct ti
  * Wrapper on top of recvmsg which emulates recvfrom but it's also able to return ttl. sock is
  * socket where to make recvmsg. from_addr is address where address of source will be stored. msg is
  * buffer where to store message with maximum msg_len size. ttl is pointer where TTL (time-to-live)
- * from packet will be stored (or 0 if no such information is available).
+ * from packet will be stored (or 0 if no such information is available). Timestamp is filled
+ * either by SCM_TIMESTAMP directly from packet (if supported) or current get gettimeofday.
+ * NULL can be passed as timestamp pointer.
  * Return number of received bytes, or -2 on EINTR, -3 on one of EHOSTUNREACH | ENETDOWN |
- * EHOSTDOWN, -4 if message is truncated, or -1 on different error.
+ * EHOSTDOWN | ECONNRESET, -4 if message is truncated, or -1 on different error.
  */
 ssize_t
 rs_receive_msg(int sock, struct sockaddr_storage *from_addr, char *msg, size_t msg_len,
-    uint8_t *ttl)
+    uint8_t *ttl, struct timeval *timestamp)
 {
 	char cmsg_buf[CMSG_SPACE(1024)];
 	struct cmsghdr *cmsg;
@@ -141,8 +143,10 @@ rs_receive_msg(int sock, struct sockaddr_storage *from_addr, char *msg, size_t m
 	struct msghdr msg_hdr;
 	ssize_t recv_size;
 	int ittl;
+	int timestamp_set;
 
 	ittl = 0;
+	timestamp_set = 0;
 
 	memset(&msg_iovec, 0, sizeof(msg_iovec));
 	msg_iovec.iov_base = msg;
@@ -164,8 +168,10 @@ rs_receive_msg(int sock, struct sockaddr_storage *from_addr, char *msg, size_t m
 			return (-2);
 		}
 
-		if (errno == EHOSTUNREACH || errno == EHOSTDOWN || errno == ENETDOWN) {
-			DEBUG2_PRINTF("recvmsg error - EHOSTUNREACH || EHOSTDOWN || ENETDOWN");
+		if (errno == EHOSTUNREACH || errno == EHOSTDOWN || errno == ENETDOWN ||
+		    errno == ECONNRESET) {
+			DEBUG2_PRINTF("recvmsg error - EHOSTUNREACH || EHOSTDOWN || ENETDOWN ||"
+			    " ECONNRESET");
 			return (-3);
 		}
 
@@ -180,6 +186,14 @@ rs_receive_msg(int sock, struct sockaddr_storage *from_addr, char *msg, size_t m
 
 	for (cmsg = CMSG_FIRSTHDR(&msg_hdr); cmsg != NULL; cmsg = CMSG_NXTHDR(&msg_hdr, cmsg)) {
 		switch (cmsg->cmsg_level) {
+		case SOL_SOCKET:
+#ifdef SCM_TIMESTAMP
+			if (cmsg->cmsg_type == SCM_TIMESTAMP &&
+			    cmsg->cmsg_len >= sizeof(struct timeval) && timestamp != NULL) {
+				memcpy(timestamp, CMSG_DATA(cmsg), sizeof(struct timeval));
+				timestamp_set = 1;
+			}
+#endif
 		case IPPROTO_IP:
 			if (cmsg->cmsg_type == IP_TTL && cmsg->cmsg_len == CMSG_LEN(sizeof(int))) {
 				memcpy(&ittl, CMSG_DATA(cmsg), sizeof(ittl));
@@ -201,14 +215,18 @@ rs_receive_msg(int sock, struct sockaddr_storage *from_addr, char *msg, size_t m
 
 	*ttl = (uint8_t)ittl;
 
+	if (!timestamp_set && timestamp != NULL) {
+		*timestamp = util_get_time();
+	}
+
 	return (recv_size);
 }
 
 /*
  * Thin wrapper on top of sendto. sock is socket, msg is message with msg_size length to send and to
  * is address where to send message.
- * Return number of sent bytes or -2 on EINTR, -3 on one of EHOSTDOWN | ENETDOWN | EHOSTUNREACH or
- * -1 on some different error (sent != msg_size).
+ * Return number of sent bytes or -2 on EINTR, -3 on one of EHOSTDOWN | ENETDOWN | EHOSTUNREACH |
+ * ENOBUFS or -1 on some different error (sent != msg_size).
  */
 ssize_t
 rs_sendto(int sock, const char *msg, size_t msg_size, const struct sockaddr_storage *to)
@@ -223,8 +241,10 @@ rs_sendto(int sock, const char *msg, size_t msg_size, const struct sockaddr_stor
 			return (-2);
 		}
 
-		if (errno == EHOSTUNREACH || errno == EHOSTDOWN || errno == ENETDOWN) {
-			DEBUG2_PRINTF("sendto error - EHOSTUNREACH || EHOSTDOWN || ENETDOWN");
+		if (errno == EHOSTUNREACH || errno == EHOSTDOWN || errno == ENETDOWN ||
+		    errno == ENOBUFS) {
+			DEBUG2_PRINTF("sendto error - EHOSTUNREACH || EHOSTDOWN || ENETDOWN ||"
+			    "ENOBUFS");
 			return (-3);
 		}
 
@@ -232,7 +252,7 @@ rs_sendto(int sock, const char *msg, size_t msg_size, const struct sockaddr_stor
 		return (-1);
 	}
 
-	if (sent != msg_size) {
+	if ((size_t)sent != msg_size) {
 		DEBUG2_PRINTF("sendto error - sent != msg_size");
 
 		return (-1);

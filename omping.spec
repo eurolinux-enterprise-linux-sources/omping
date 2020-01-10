@@ -1,12 +1,11 @@
 Name: omping
-Version: 0.0.1
-Release: 4%{?dist}
+Version: 0.0.4
+Release: 1%{?dist}
 Summary: Utility to test IP multicast functionality
 Group: Applications/Internet
 License: ISC
 URL: http://fedorahosted.org/omping/
 Source0: http://fedorahosted.org/releases/o/m/omping/%{name}-%{version}.tar.gz
-Patch0: omping-001-one-host-specified.patch
 BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}-root-%(%{__id_u} -n)
 
 %description
@@ -15,7 +14,6 @@ primarily in local network.
 
 %prep
 %setup -q
-%patch0 -p1
 
 %build
 make %{?_smp_mflags} CFLAGS="%{optflags}"
@@ -34,6 +32,9 @@ rm -rf %{buildroot}
 %{_mandir}/man8/*
 
 %changelog
+* Fri Jul 15 2011 Jan Friesse <jfriesse@redhat.com> - 0.0.4-1
+- Rebase to upstream 0.0.4 (#696747).
+
 * Tue Dec 07 2010 Jan Friesse <jfriesse@redhat.com> - 0.0.1-4
 - Initial RHEL-6 build (#657370).
 
